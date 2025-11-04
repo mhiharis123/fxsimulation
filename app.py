@@ -430,4 +430,8 @@ def pm_set_global_markup():
     return jsonify({'success': True, 'total_profit': round(total_profit, 2), 'results': results, 'global_markup': global_markup_override_pm})
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+    import os
+    debug_mode = os.getenv('FLASK_DEBUG', '0') == '1'
+    port = int(os.getenv('PORT', 5000))
+    host = os.getenv('HOST', '0.0.0.0')
+    app.run(debug=debug_mode, port=port, host=host)
