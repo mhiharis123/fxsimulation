@@ -152,9 +152,10 @@ class FXProfitCalculatorPM:
         wb = openpyxl.load_workbook(self.excel_file)
         ws = wb['PM']
         
-        daily_data = {}
+        daily_data = {}  # Now stores: {(date, currency, booking_id): {BUY, SELL, BANK, ...}}
         current_currency = None
         current_date = None
+        booking_counter = {}  # Track booking numbers per (date, currency)
         
         for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), 2):
             trade_date = row[0]
@@ -174,9 +175,15 @@ class FXProfitCalculatorPM:
             if isinstance(currency_col_i, str) and '-' in currency_col_i:
                 continue
             
-            # Update current currency and date when we see a currency in column I
-            # This is the primary reference for currency
-            if currency_col_i and isinstance(currency_col_i, str) and currency_col_i not in ['', 'TOTAL PROFIT:']:
+            # Detect new booking block when we see a BUY with currency in column I
+            if direction == 'BUY' and currency_col_i and isinstance(currency_col_i, str) and currency_col_i not in ['', 'TOTAL PROFIT:']:
+                if currency_col_i != current_currency or (trade_date and trade_date != current_date):
+                    # New currency or new date = new booking
+                    booking_key = (trade_date if trade_date else current_date, currency_col_i)
+                    if booking_key not in booking_counter:
+                        booking_counter[booking_key] = 0
+                    booking_counter[booking_key] += 1
+                
                 current_currency = currency_col_i
                 if trade_date:
                     current_date = trade_date
@@ -188,8 +195,10 @@ class FXProfitCalculatorPM:
             # Use current date if trade_date is None (for separated currency sections)
             effective_date = trade_date if trade_date else current_date
             
-            # Create key with date and currency
-            key = (effective_date, current_currency)
+            # Create unique key including booking number
+            booking_key = (effective_date, current_currency)
+            booking_id = booking_counter.get(booking_key, 1)
+            key = (effective_date, current_currency, booking_id)
             
             if key not in daily_data:
                 daily_data[key] = {}
@@ -267,7 +276,8 @@ class FXProfitCalculatorPM:
         
         profit = buy_value - sell_value - bank_value
         
-        trade_date, currency = date_key
+        trade_date = date_key[0]
+        currency = date_key[1]
         
         return {
             'date': trade_date.strftime('%Y-%m-%d') if isinstance(trade_date, datetime) else trade_date,
@@ -287,14 +297,17 @@ class FXProfitCalculatorPM:
         results = []
         total_profit = 0
         
-        # Sort by date first, then currency
-        sorted_keys = sorted([k for k in self.data.keys() if k[0] is not None and k[1] is not None], key=lambda x: (x[0], x[1]))
+        # Sort by date first, then currency, then booking_id
+        sorted_keys = sorted([k for k in self.data.keys() if k[0] is not None and k[1] is not None], 
+                            key=lambda x: (x[0], x[1], x[2] if len(x) > 2 else 0))
         
         for date_key in sorted_keys:
             date_str = "{}_{}".format(
                 date_key[0].strftime('%Y-%m-%d') if isinstance(date_key[0], datetime) else date_key[0],
                 date_key[1]
             )
+            if len(date_key) > 2:
+                date_str = "{}#{}".format(date_str, date_key[2])
             
             if global_markup is not None:
                 new_buy_rate, new_sell_rate = self.calculate_rates_from_markup(date_key, global_markup)
