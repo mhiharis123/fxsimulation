@@ -278,10 +278,12 @@ class FXProfitCalculatorPM:
         
         trade_date = date_key[0]
         currency = date_key[1]
+        booking_id = date_key[2] if len(date_key) > 2 else 1
         
         return {
             'date': trade_date.strftime('%Y-%m-%d') if isinstance(trade_date, datetime) else trade_date,
             'currency': currency,
+            'booking_id': booking_id,
             'buy_rate': round(buy_rate, 4),
             'sell_rate': round(sell_rate, 4),
             'bank_rate': round(bank_rate, 4),
@@ -390,10 +392,12 @@ def pm_update_rate():
     data = request.json
     date_str = data['date']
     currency = data['currency']
+    booking_id = data.get('booking_id', 1)
     rate_type = data['type']
     rate_value = float(data['rate'])
     
-    key = "{}_{}".format(date_str, currency)
+    key = "{}_{}#{}".format(date_str, currency, booking_id)
+    
     if key not in calculator_pm.adjustments:
         calculator_pm.adjustments[key] = {}
     

@@ -374,18 +374,18 @@
                 </thead>
                 <tbody id="tableBody">
                     {% for result in results %}
-                    <tr class="data-row" data-currency="{{ result.currency }}">
+                    <tr class="data-row" data-currency="{{ result.currency }}" data-booking-id="{{ result.booking_id }}">
                         <td class="date-cell">{{ result.date }}</td>
                         <td class="currency-cell">{{ result.currency }}</td>
                         <td>
                             <input type="number" step="0.0001" class="rate-input" 
                                    value="{{ result.buy_rate }}" 
-                                   onchange="updateRate('{{ result.date }}', '{{ result.currency }}', 'buy', this.value)">
+                                   onchange="updateRate('{{ result.date }}', '{{ result.currency }}', 'buy', this.value, this)">
                         </td>
                         <td>
                             <input type="number" step="0.0001" class="rate-input" 
                                    value="{{ result.sell_rate }}" 
-                                   onchange="updateRate('{{ result.date }}', '{{ result.currency }}', 'sell', this.value)">
+                                   onchange="updateRate('{{ result.date }}', '{{ result.currency }}', 'sell', this.value, this)">
                         </td>
                         <td class="number">{{ result.bank_rate }}</td>
                         <td class="number">{{ result.mark_up }}</td>
@@ -486,9 +486,12 @@
             });
         }
         
-        function updateRate(date, currency, type, value) {
+        function updateRate(date, currency, type, value, inputElement) {
             const loading = document.getElementById('loading');
             loading.classList.add('show');
+            
+            const row = inputElement.closest('tr');
+            const bookingId = row ? row.dataset.bookingId : 1;
             
             fetch('/api/pm/update-rate', {
                 method: 'POST',
@@ -498,6 +501,7 @@
                 body: JSON.stringify({
                     date: date,
                     currency: currency,
+                    booking_id: parseInt(bookingId),
                     type: type,
                     rate: parseFloat(value)
                 })
@@ -548,6 +552,7 @@
                 const row = document.createElement('tr');
                 row.className = 'data-row';
                 row.dataset.currency = result.currency;
+                row.dataset.bookingId = result.booking_id;
                 
                 const profitClass = result.profit >= 0 ? 'profit-positive' : 'profit-negative';
                 const tradeClass = result.trade_type === 'SELL' ? 'badge-sell' : 'badge-buy';
@@ -558,12 +563,12 @@
                     <td>
                         <input type="number" step="0.0001" class="rate-input" 
                                value="${result.buy_rate}" 
-                               onchange="updateRate('${result.date}', '${result.currency}', 'buy', this.value)">
+                               onchange="updateRate('${result.date}', '${result.currency}', 'buy', this.value, this)">
                     </td>
                     <td>
                         <input type="number" step="0.0001" class="rate-input" 
                                value="${result.sell_rate}" 
-                               onchange="updateRate('${result.date}', '${result.currency}', 'sell', this.value)">
+                               onchange="updateRate('${result.date}', '${result.currency}', 'sell', this.value, this)">
                     </td>
                     <td class="number">${result.bank_rate}</td>
                     <td class="number">${result.mark_up}</td>
