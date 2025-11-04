@@ -80,9 +80,42 @@
         
         .controls {
             display: flex;
-            gap: 10px;
+            flex-wrap: wrap;
+            gap: 20px;
             margin-bottom: 20px;
             justify-content: center;
+            align-items: center;
+        }
+        
+        .global-markup-control {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            background: #f0f0f0;
+            padding: 12px 20px;
+            border-radius: 6px;
+            border: 1px solid #ddd;
+        }
+        
+        .global-markup-control label {
+            font-weight: 500;
+            color: #333;
+            white-space: nowrap;
+        }
+        
+        .global-markup-control input {
+            width: 120px;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+            text-align: right;
+        }
+        
+        .global-markup-control input:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 4px rgba(102, 126, 234, 0.3);
         }
         
         button {
@@ -248,7 +281,13 @@
         </div>
         
         <div class="controls">
-            <button onclick="resetRates()">Reset All Rates</button>
+            <div class="global-markup-control">
+                <label for="globalMarkup">Global Mark Up Override:</label>
+                <input type="number" id="globalMarkup" step="0.0001" placeholder="Enter mark up value" min="0">
+                <button onclick="applyGlobalMarkup()">Apply to All</button>
+                <button onclick="clearGlobalMarkup()">Clear Override</button>
+            </div>
+            <button onclick="resetRates()" class="reset-btn">Reset All Rates</button>
         </div>
         
         <div class="loading" id="loading">
@@ -306,6 +345,71 @@
     </div>
     
     <script>
+        function applyGlobalMarkup() {
+            const markupInput = document.getElementById('globalMarkup');
+            const markupValue = markupInput.value;
+            
+            if (!markupValue || markupValue === '') {
+                alert('Please enter a mark up value');
+                return;
+            }
+            
+            const loading = document.getElementById('loading');
+            loading.classList.add('show');
+            
+            fetch('/api/set-global-markup', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    markup: parseFloat(markupValue)
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    updateTable(data.results, data.total_profit);
+                    alert('Global mark up of ' + markupValue + ' applied to all rows!');
+                }
+                loading.classList.remove('show');
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                loading.classList.remove('show');
+                alert('Error applying global mark up');
+            });
+        }
+        
+        function clearGlobalMarkup() {
+            const markupInput = document.getElementById('globalMarkup');
+            markupInput.value = '';
+            
+            const loading = document.getElementById('loading');
+            loading.classList.add('show');
+            
+            fetch('/api/set-global-markup', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    markup: null
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    updateTable(data.results, data.total_profit);
+                }
+                loading.classList.remove('show');
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                loading.classList.remove('show');
+            });
+        }
+        
         function updateRate(date, type, value) {
             const loading = document.getElementById('loading');
             loading.classList.add('show');

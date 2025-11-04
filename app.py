@@ -74,7 +74,8 @@ class FXProfitCalculator:
         
         is_sell_trade = sell_value > buy_value
         
-        mark_up = (sell_rate - bank_rate) if is_sell_trade else (buy_rate - bank_rate)
+        mark_up_raw = (sell_rate - bank_rate) if is_sell_trade else (buy_rate - bank_rate)
+        mark_up = abs(mark_up_raw)  # Always show positive value
         
         profit = buy_value - sell_value - bank_value
         
@@ -91,15 +92,45 @@ class FXProfitCalculator:
             'mark_up': round(mark_up, 4)
         }
     
-    def calculate_all_profits(self):
+    def calculate_rates_from_markup(self, date_key, markup_value):
+        """Reverse calculate buy/sell rates from desired markup"""
+        if date_key not in self.data:
+            return None, None
+        
+        day = self.data[date_key]
+        bank_rate = day['BANK']['rate']
+        
+        # Get original values to determine trade type
+        original_buy_value = day['BUY']['value']
+        original_sell_value = day['SELL']['value']
+        is_sell_trade = original_sell_value > original_buy_value
+        
+        if is_sell_trade:
+            # For SELL: Sell Rate = Bank Rate - Mark Up
+            new_sell_rate = bank_rate - markup_value
+            return None, new_sell_rate
+        else:
+            # For BUY: Buy Rate = Bank Rate + Mark Up
+            new_buy_rate = bank_rate + markup_value
+            return new_buy_rate, None
+    
+    def calculate_all_profits(self, global_markup=None):
         results = []
         total_profit = 0
         
         for date_key in sorted(self.data.keys()):
             # Format date consistently for lookup
             date_str = date_key.strftime('%Y-%m-%d') if isinstance(date_key, datetime) else date_key
-            buy_rate = self.adjustments.get(date_str, {}).get('buy')
-            sell_rate = self.adjustments.get(date_str, {}).get('sell')
+            
+            if global_markup is not None:
+                # Use global markup override
+                new_buy_rate, new_sell_rate = self.calculate_rates_from_markup(date_key, global_markup)
+                buy_rate = new_buy_rate if new_buy_rate else self.adjustments.get(date_str, {}).get('buy')
+                sell_rate = new_sell_rate if new_sell_rate else self.adjustments.get(date_str, {}).get('sell')
+            else:
+                # Use individual adjustments
+                buy_rate = self.adjustments.get(date_str, {}).get('buy')
+                sell_rate = self.adjustments.get(date_str, {}).get('sell')
             
             day_calc = self.calculate_day_profit(date_key, buy_rate, sell_rate)
             if day_calc:
@@ -109,6 +140,7 @@ class FXProfitCalculator:
         return results, total_profit
 
 calculator = FXProfitCalculator('FX October PnL updated.xlsx')
+global_markup_override = None
 
 @app.route('/')
 def index():
@@ -135,9 +167,26 @@ def update_rate():
 
 @app.route('/api/reset', methods=['POST'])
 def reset():
+    global global_markup_override
     calculator.adjustments = {}
+    global_markup_override = None
     results, total_profit = calculator.calculate_all_profits()
     return jsonify({'success': True, 'total_profit': round(total_profit, 2), 'results': results})
+
+@app.route('/api/set-global-markup', methods=['POST'])
+def set_global_markup():
+    global global_markup_override
+    data = request.json
+    markup_value = data.get('markup')
+    
+    if markup_value is not None:
+        global_markup_override = float(markup_value)
+        results, total_profit = calculator.calculate_all_profits(global_markup=global_markup_override)
+    else:
+        global_markup_override = None
+        results, total_profit = calculator.calculate_all_profits()
+    
+    return jsonify({'success': True, 'total_profit': round(total_profit, 2), 'results': results, 'global_markup': global_markup_override})
 
 @app.route('/api/get-data')
 def get_data():
