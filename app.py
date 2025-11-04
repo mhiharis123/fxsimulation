@@ -241,12 +241,33 @@ class FXProfitCalculatorPM:
         original_sell_value = day.get('SELL', {}).get('value', 0)
         is_sell_trade = original_sell_value > original_buy_value
         
-        if is_sell_trade:
-            new_sell_rate = bank_rate - markup_value
-            return None, new_sell_rate
+        normalized_currency = str(date_key[1]).upper().strip()
+        
+        # Special handling for HKD/MYR to enforce 0.0024 spread
+        print(f"Debug: processing date_key={date_key}, currency_normalized='{normalized_currency}', is_sell_trade={is_sell_trade}, bank_rate={bank_rate}")
+        if normalized_currency in ['HKD', 'MYR', 'HKD/MYR']:
+            if is_sell_trade:
+                # For SELL trades with HKD/MYR: Sell Rate = Bank Rate - Markup, Buy Rate = Sell Rate + 0.0024
+                new_sell_rate = bank_rate - markup_value
+                new_buy_rate = new_sell_rate + 0.0024
+                # Debug logging for HKD/MYR SELL trades
+                print(f"Debug HKD/MYR SELL: bank_rate={bank_rate}, markup={markup_value}, new_sell_rate={new_sell_rate}, new_buy_rate={new_buy_rate}, spread={new_buy_rate - new_sell_rate}")
+                return new_buy_rate, new_sell_rate
+            else:
+                # For BUY trades with HKD/MYR: Buy Rate = Bank Rate + Markup, Sell Rate = Buy Rate - 0.0024
+                new_buy_rate = bank_rate + markup_value
+                new_sell_rate = new_buy_rate - 0.0024
+                # Debug logging for HKD/MYR BUY trades
+                print(f"Debug HKD/MYR BUY: bank_rate={bank_rate}, markup={markup_value}, new_buy_rate={new_buy_rate}, new_sell_rate={new_sell_rate}, spread={new_buy_rate - new_sell_rate}")
+                return new_buy_rate, new_sell_rate
         else:
-            new_buy_rate = bank_rate + markup_value
-            return new_buy_rate, None
+            # Original logic for other currencies
+            if is_sell_trade:
+                new_sell_rate = bank_rate - markup_value
+                return None, new_sell_rate
+            else:
+                new_buy_rate = bank_rate + markup_value
+                return new_buy_rate, None
     
     def calculate_day_profit(self, date_key, buy_rate_override=None, sell_rate_override=None):
         if date_key not in self.data:
@@ -295,7 +316,7 @@ class FXProfitCalculatorPM:
             'mark_up': round(mark_up, 4)
         }
     
-    def calculate_all_profits(self, global_markup=None):
+    def calculate_all_profits(self, global_markup=None, filter_currency=None):
         results = []
         total_profit = 0
         
@@ -304,23 +325,44 @@ class FXProfitCalculatorPM:
                             key=lambda x: (x[0], x[1], x[2] if len(x) > 2 else 0))
         
         for date_key in sorted_keys:
+            normalized_currency = str(date_key[1]).upper().strip()
             date_str = "{}_{}".format(
                 date_key[0].strftime('%Y-%m-%d') if isinstance(date_key[0], datetime) else date_key[0],
-                date_key[1]
+                normalized_currency
             )
             if len(date_key) > 2:
                 date_str = "{}#{}".format(date_str, date_key[2])
             
+            # Skip if filter_currency is set and doesn't match
+            if filter_currency and normalized_currency != filter_currency.upper():
+                continue
+            
             if global_markup is not None:
+                print(f"Before calculate_rates_from_markup: date_key={date_key}, global_markup={global_markup}")
                 new_buy_rate, new_sell_rate = self.calculate_rates_from_markup(date_key, global_markup)
-                buy_rate = new_buy_rate if new_buy_rate else self.adjustments.get(date_str, {}).get('buy')
-                sell_rate = new_sell_rate if new_sell_rate else self.adjustments.get(date_str, {}).get('sell')
+                print(f"After calculate_rates_from_markup: new_buy_rate={new_buy_rate}, new_sell_rate={new_sell_rate}")
+                buy_rate = new_buy_rate
+                sell_rate = new_sell_rate
+                print(f"Assigned rates: buy_rate={buy_rate}, sell_rate={sell_rate}")
             else:
                 buy_rate = self.adjustments.get(date_str, {}).get('buy')
                 sell_rate = self.adjustments.get(date_str, {}).get('sell')
+                
+                # Apply HKD/MYR spread constraint: buy_rate - sell_rate = 0.0024
+                if normalized_currency in ['HKD', 'MYR', 'HKD/MYR']:
+                    if buy_rate is not None and sell_rate is None:
+                        sell_rate = buy_rate - 0.0024
+                    elif sell_rate is not None and buy_rate is None:
+                        buy_rate = sell_rate + 0.0024
+                    elif buy_rate is not None and sell_rate is not None:
+                        # Both set - adjust sell_rate to maintain spread
+                        sell_rate = buy_rate - 0.0024
             
             day_calc = self.calculate_day_profit(date_key, buy_rate, sell_rate)
             if day_calc:
+                # Debug logging for HKD/MYR
+                if str(date_key[1]).upper() in ['HKD', 'MYR', 'HKD/MYR']:
+                    print(f"Final rates for {date_key[0]} {date_key[1]}: buy={buy_rate}, sell={sell_rate}, spread={buy_rate - sell_rate if buy_rate and sell_rate else 'N/A'}")
                 results.append(day_calc)
                 total_profit += day_calc['profit']
         
@@ -391,10 +433,11 @@ def pm_update_rate():
     global global_markup_override_pm
     data = request.json
     date_str = data['date']
-    currency = data['currency']
+    currency = data['currency'].upper().strip()
     booking_id = data.get('booking_id', 1)
     rate_type = data['type']
     rate_value = float(data['rate'])
+    filter_currency = data.get('filter_currency')
     
     key = "{}_{}#{}".format(date_str, currency, booking_id)
     
@@ -403,11 +446,17 @@ def pm_update_rate():
     
     if rate_type == 'buy':
         calculator_pm.adjustments[key]['buy'] = rate_value
+        # For HKD/MYR, maintain 0.0024 spread: buy - sell = 0.0024
+        if currency in ['HKD', 'MYR', 'HKD/MYR']:
+            calculator_pm.adjustments[key]['sell'] = rate_value - 0.0024
     else:
         calculator_pm.adjustments[key]['sell'] = rate_value
+        # For HKD/MYR, maintain 0.0024 spread: buy - sell = 0.0024
+        if currency in ['HKD', 'MYR', 'HKD/MYR']:
+            calculator_pm.adjustments[key]['buy'] = rate_value + 0.0024
     
     global_markup_override_pm = None
-    results, total_profit = calculator_pm.calculate_all_profits()
+    results, total_profit = calculator_pm.calculate_all_profits(filter_currency=filter_currency)
     return jsonify({'success': True, 'total_profit': round(total_profit, 2), 'results': results})
 
 @app.route('/api/pm/reset', methods=['POST'])
@@ -415,7 +464,9 @@ def pm_reset():
     global global_markup_override_pm
     calculator_pm.adjustments = {}
     global_markup_override_pm = None
-    results, total_profit = calculator_pm.calculate_all_profits()
+    data = request.json
+    filter_currency = data.get('filter_currency') if data else None
+    results, total_profit = calculator_pm.calculate_all_profits(filter_currency=filter_currency)
     return jsonify({'success': True, 'total_profit': round(total_profit, 2), 'results': results})
 
 @app.route('/api/pm/set-global-markup', methods=['POST'])
@@ -423,13 +474,14 @@ def pm_set_global_markup():
     global global_markup_override_pm
     data = request.json
     markup_value = data.get('markup')
+    filter_currency = data.get('filter_currency')
     
     if markup_value is not None:
         global_markup_override_pm = float(markup_value)
-        results, total_profit = calculator_pm.calculate_all_profits(global_markup=global_markup_override_pm)
+        results, total_profit = calculator_pm.calculate_all_profits(global_markup=global_markup_override_pm, filter_currency=filter_currency)
     else:
         global_markup_override_pm = None
-        results, total_profit = calculator_pm.calculate_all_profits()
+        results, total_profit = calculator_pm.calculate_all_profits(filter_currency=filter_currency)
     
     return jsonify({'success': True, 'total_profit': round(total_profit, 2), 'results': results, 'global_markup': global_markup_override_pm})
 

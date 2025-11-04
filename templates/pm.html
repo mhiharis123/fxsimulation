@@ -419,11 +419,38 @@
                     row.style.display = 'none';
                 }
             });
+            
+            // Recalculate total profit based on filtered currency
+            recalculateFilteredProfit(filter);
+        }
+        
+        function recalculateFilteredProfit(filter) {
+            const rows = document.querySelectorAll('.data-row');
+            let totalProfit = 0;
+            
+            rows.forEach(row => {
+                if (filter === '' || row.dataset.currency === filter) {
+                    const profitCell = row.querySelector('td:last-child');
+                    if (profitCell) {
+                        totalProfit += parseFloat(profitCell.textContent);
+                    }
+                }
+            });
+            
+            const profitCard = document.getElementById('profitCard');
+            profitCard.classList.remove('positive', 'negative');
+            if (totalProfit >= 0) {
+                profitCard.classList.add('positive');
+            } else {
+                profitCard.classList.add('negative');
+            }
+            profitCard.querySelector('.value').textContent = `RM ${totalProfit.toFixed(2)}`;
         }
         
         function applyGlobalMarkup() {
             const markupInput = document.getElementById('globalMarkup');
             const markupValue = markupInput.value;
+            const filterCurrency = document.getElementById('currencyFilter').value;
             
             if (!markupValue || markupValue === '') {
                 alert('Please enter a mark up value');
@@ -439,7 +466,8 @@
                     'Content-Type': 'application/json',
                 },
                 body: JSON.stringify({
-                    markup: parseFloat(markupValue)
+                    markup: parseFloat(markupValue),
+                    filter_currency: filterCurrency !== '' ? filterCurrency : null
                 })
             })
             .then(response => response.json())
@@ -460,6 +488,7 @@
         function clearGlobalMarkup() {
             const markupInput = document.getElementById('globalMarkup');
             markupInput.value = '';
+            const filterCurrency = document.getElementById('currencyFilter').value;
             
             const loading = document.getElementById('loading');
             loading.classList.add('show');
@@ -470,7 +499,8 @@
                     'Content-Type': 'application/json',
                 },
                 body: JSON.stringify({
-                    markup: null
+                    markup: null,
+                    filter_currency: filterCurrency !== '' ? filterCurrency : null
                 })
             })
             .then(response => response.json())
@@ -492,6 +522,7 @@
             
             const row = inputElement.closest('tr');
             const bookingId = row ? row.dataset.bookingId : 1;
+            const filterCurrency = document.getElementById('currencyFilter').value;
             
             fetch('/api/pm/update-rate', {
                 method: 'POST',
@@ -503,7 +534,8 @@
                     currency: currency,
                     booking_id: parseInt(bookingId),
                     type: type,
-                    rate: parseFloat(value)
+                    rate: parseFloat(value),
+                    filter_currency: filterCurrency !== '' ? filterCurrency : null
                 })
             })
             .then(response => response.json())
@@ -523,12 +555,16 @@
             if (confirm('Are you sure you want to reset all rates to their original values?')) {
                 const loading = document.getElementById('loading');
                 loading.classList.add('show');
+                const filterCurrency = document.getElementById('currencyFilter').value;
                 
                 fetch('/api/pm/reset', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                    }
+                    },
+                    body: JSON.stringify({
+                        filter_currency: filterCurrency !== '' ? filterCurrency : null
+                    })
                 })
                 .then(response => response.json())
                 .then(data => {
